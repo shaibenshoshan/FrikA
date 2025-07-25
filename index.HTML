@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audiovisual Wave Generator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400&display=swap" rel="stylesheet">
+    <!-- Include the Tone.js library for audio generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
+    <style>
+        /* --- General Body & Font Styles --- */
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #fff;
+        }
+
+        /* --- Canvas Styling --- */
+        canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* --- Instructions Text --- */
+        #instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 2;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 16px;
+            font-weight: 400;
+            text-align: center;
+            pointer-events: none; /* Allows clicks to pass through to the canvas */
+        }
+        
+        /* --- Stop Button Styling --- */
+        #stopButton {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 3;
+            background-color: rgba(220, 38, 38, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-family: 'Inter', sans-serif;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.2s;
+        }
+        #stopButton:hover {
+            background-color: rgba(220, 38, 38, 0.9);
+        }
+        #stopButton:active {
+            transform: scale(0.95);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="waveCanvas"></canvas>
+    
+    <div id="instructions">Click or tap to create a wave and a tone</div>
+    <button id="stopButton">Stop All Sounds</button>
+
+    <script>
+        // --- Canvas and Context Setup ---
+        const canvas = document.getElementById('waveCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // --- Global Variables & State ---
+        const radioWaves = [];
+        const activeSynths = []; // Array to keep track of playing synths
+        let hue = 200; // Starting hue for a nice blue
+        let audioStarted = false;
+
+        // --- Utility Functions ---
+        function handleResize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+
+        // --- RadioWave Class ---
+        class RadioWave {
+            constructor(x, y, hue) {
+                this.x = x;
+                this.y = y;
+                this.hue = hue;
+                this.radius = 1;
+                this.alpha = 1;
+                this.lineWidth = 3;
+            }
+
+            update() {
+                this.radius += 2.0;
+                if (this.alpha > 0) {
+                    this.alpha -= 0.005; // Fades over ~200 frames
+                } else {
+                    this.alpha = 0;
+                }
+            }
+
+            draw() {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2, false);
+                ctx.strokeStyle = `hsla(${this.hue}, 100%, 70%, ${this.alpha})`;
+                ctx.lineWidth = this.lineWidth;
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        // --- Main Animation Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+            // Clear the canvas with a low alpha to create a trail effect
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Cycle the hue for the next wave
+            hue = (hue + 0.5) % 360;
+
+            // Update and draw all active radio waves
+            for (let i = radioWaves.length - 1; i >= 0; i--) {
+                const wave = radioWaves[i];
+                wave.update();
+                wave.draw();
+                if (wave.alpha <= 0) {
+                    radioWaves.splice(i, 1);
+                }
+            }
+        }
+
+        // --- Sound Control Functions ---
+        function stopAllSounds() {
+            // Go through all active synths and trigger their release envelope,
+            // which gracefully fades them out.
+            while(activeSynths.length){
+                const synth = activeSynths.pop();
+                synth.triggerRelease();
+                // Tone.js will handle garbage collection of the synth after its release.
+            }
+            console.log('Stop command sent to all playing sounds.');
+        }
+
+        // --- Event Listener for creating waves and sound ---
+        function createWaveAndTone(e) {
+            // Start the audio context on the first user interaction (required by browsers)
+            if (!audioStarted) {
+                Tone.start();
+                audioStarted = true;
+                console.log('Audio context started.');
+            }
+
+            const mouseX = e.clientX || (e.touches && e.touches[0].clientX);
+            const mouseY = e.clientY || (e.touches && e.touches[0].clientY);
+            
+            // Create the visual wave with the current hue
+            radioWaves.push(new RadioWave(mouseX, mouseY, hue));
+
+            // --- Sound Generation ---
+            const synth = new Tone.Synth({
+                volume: -20, // Set volume to -20 decibels
+                oscillator: { type: "sine" },
+                envelope: {
+                    attack: 0.01,
+                    decay: 0.1,
+                    sustain: 0.3,
+                    release: 0.9 // Adjust release to make total sound duration ~1s
+                }
+            }).toDestination();
+
+            // Add the new synth to our list of active synths
+            activeSynths.push(synth);
+
+            // When the synth is done playing naturally, remove it from the active list.
+            // This is good for memory management if the stop button isn't used.
+            synth.onsilence = () => {
+                const index = activeSynths.indexOf(synth);
+                if (index > -1) {
+                    activeSynths.splice(index, 1);
+                }
+            };
+
+            // Generate a random frequency between 100 Hz and 900 Hz
+            const randomFreq = Math.random() * 800 + 100;
+
+            // Play the note.
+            synth.triggerAttackRelease(randomFreq, "0.1s");
+        }
+
+        // --- Initial Setup ---
+        const stopButton = document.getElementById('stopButton');
+        window.addEventListener('resize', handleResize);
+        canvas.addEventListener('click', createWaveAndTone);
+        canvas.addEventListener('touchstart', createWaveAndTone);
+        stopButton.addEventListener('click', stopAllSounds);
+
+        // Start the animation loop
+        animate();
+    </script>
+</body>
+</html>
